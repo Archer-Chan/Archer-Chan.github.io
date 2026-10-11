@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d11">
+<title>弦境 · 射箭训练与闯关</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<!-- 对局内 HUD -->
+<div id="hud" class="hidden">
+  <div class="hud-top">
+    <button id="hud-exit" class="icon-btn" aria-label="退出">←</button>
+    <div class="hud-group">
+      <span id="hud-level" class="hud-label"></span>
+      <span class="hud-arrow-ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="17" height="17">
+        <line x1="4.5" y1="19.5" x2="17.5" y2="6.5" stroke="#e0be8c" stroke-width="2.2" stroke-linecap="round"/>
+        <path d="M17.5 6.5 L12.8 7.4 M17.5 6.5 L16.6 11.2" stroke="#ece7dd" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+        <path d="M4.5 19.5 L8.6 18.4 L5.6 15.4 Z" fill="#d84a4a"/>
+      </svg></span>
+      <span id="hud-arrows" class="hud-num"></span>
+    </div>
+    <div class="hud-group">
+      <span class="hud-label">总分</span>
+      <span id="hud-score" class="hud-num accent">0</span>
+    </div>
+    <div id="hud-wind" class="hud-group wind-chip hidden">
+      <span class="hud-label">风</span>
+      <span id="hud-wind-v" class="hud-num"></span>
+      <span id="hud-wind-arrow"></span>
+    </div>
+  </div>
+  <div class="hud-bottom">
+    <div class="steady-wrap">
+      <span class="hud-label">稳定</span>
+      <div class="steady-bar"><div id="steady-fill"></div></div>
+      <span id="steady-num" class="hud-num">--</span>
+    </div>
+    <div id="hud-hint" class="hud-hint">按住屏幕任意处拉弓 · 稳住 · 松手撒放</div>
+  </div>
+  <div id="shot-popup" class="hidden"></div>
+  <div class="breath-wrap" id="breath-wrap">
+    <span class="breath-tag">稳</span>
+    <div class="breath-bar"><div id="breath-dot"></div></div>
+    <span class="breath-tag">浮</span>
+  </div>
+  <div class="hud-timer" id="hud-timer">
+    <span class="hud-label">拉弓</span>
+    <span id="hud-timer-num" class="hud-num">0 s</span>
+  </div>
+  <div id="hud-bow">
+    <img id="hud-bow-img" alt="当前弓种">
+    <span id="hud-bow-name"></span>
+  </div>
+</div>
+
+<!-- 屏幕层 -->
+<div id="screens">
+
+  <section id="screen-home" class="screen">
+    <div class="home-inner">
+      <p class="overline">ARCHERY&nbsp;·&nbsp;TRAIN&nbsp;&amp;&nbsp;QUEST</p>
+      <h1 class="title">弦<span class="accent">境</span></h1>
+      <p class="subtitle">举机为弓，以呼吸校准心跳。</p>
+      <div class="mode-cards">
+        <button class="mode-card" id="btn-mode-train">
+          <span class="mode-kicker">日常训练</span>
+          <span class="mode-name">持弓瞄准练习</span>
+          <span class="mode-desc">虚拟标靶 · 环境晃动模拟<br>稳定性与散布分析报告</span>
+        </button>
+        <button class="mode-card" id="btn-mode-quest">
+          <span class="mode-kicker">秘境闯关</span>
+          <span class="mode-name">巡回射箭之旅</span>
+          <span class="mode-desc">青松谷 → 雪岭 → 星坠荒原<br>沿路径逐关解锁 · 星级评定</span>
+        </button>
+      </div>
+      <p class="footnote">手机端起后可启用陀螺仪瞄准 · 桌面端用鼠标移动瞄准</p>
+    </div>
+  </section>
+
+  <section id="screen-train" class="screen hidden">
+    <div class="panel">
+      <h2>训练设置</h2>
+      <div class="field">
+        <label>弓种 / 瞄具</label>
+        <div class="pills" id="train-bow"></div>
+        <p class="bow-desc" id="bow-desc"></p>
+      </div>
+      <div class="field">
+        <label>距离</label>
+        <div class="pills" id="train-dist"></div>
+      </div>
+      <div class="field hidden" id="face-row">
+        <label>靶纸（奥运赛场）</label>
+        <div class="pills" id="train-face"></div>
+      </div>
+      <div class="field">
+        <label>视觉比例</label>
+        <div class="pills" id="train-scale"></div>
+        <p class="bow-desc" id="scale-desc"></p>
+      </div>
+      <div class="field">
+        <label>环境</label>
+        <div class="pills" id="train-env"></div>
+      </div>
+      <div class="field">
+        <label>箭数</label>
+        <div class="pills" id="train-arrows"></div>
+      </div>
+      <div class="field row">
+        <label>准星下落补偿</label>
+        <button id="train-assist" class="toggle" role="switch" aria-checked="true"></button>
+      </div>
+      <div class="field row" id="gyro-row">
+        <label>陀螺仪瞄准</label>
+        <button id="btn-gyro" class="toggle" role="switch" aria-checked="false"></button>
+      </div>
+      <div class="panel-actions">
+        <button class="btn ghost" id="btn-train-back">返回</button>
+        <button class="btn primary" id="btn-train-start">开始训练</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="screen-map" class="screen hidden">
+    <div class="map-header">
+      <button class="icon-btn" id="btn-map-back">←</button>
+      <h2>巡回之路</h2>
+      <div class="map-stars"><span class="star-on">★</span><span id="map-star-total" class="hud-num">0</span></div>
+      <button class="icon-btn" id="btn-map-reset" title="重置巡回进度">↺</button>
+    </div>
+    <div id="map-scroll">
+      <div id="map-inner"></div>
+    </div>
+    <p class="footnote map-foot">青松谷 · 传统弓 ｜ 雪岭 · 反曲弓 ｜ 星坠荒原 · 复合弓</p>
+  </section>
+
+  <section id="screen-report" class="screen hidden">
+    <div class="panel wide">
+      <p class="overline" id="report-kicker">SESSION REPORT</p>
+      <h2 id="report-title">训练报告</h2>
+      <div class="report-grid">
+        <div class="stat"><span class="stat-num" id="r-score">0</span><span class="stat-label">总环数</span></div>
+        <div class="stat"><span class="stat-num" id="r-avg">0.0</span><span class="stat-label">平均环</span></div>
+        <div class="stat"><span class="stat-num" id="r-steady">0</span><span class="stat-label">平均稳定度</span></div>
+        <div class="stat"><span class="stat-num" id="r-group">0</span><span class="stat-label">散布半径</span></div>
+      </div>
+      <div class="report-body">
+        <canvas id="report-target" width="220" height="220"></canvas>
+        <div class="report-right">
+          <table id="report-table"></table>
+          <ul id="report-tips" class="tips"></ul>
+        </div>
+      </div>
+      <div class="panel-actions">
+        <button class="btn ghost" id="btn-report-back">返回</button>
+        <button class="btn primary" id="btn-report-again">再来一组</button>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
