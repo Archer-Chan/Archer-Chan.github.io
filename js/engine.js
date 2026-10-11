@@ -45,7 +45,7 @@ const _bgCache = {};
 function bgImage(key) {
   if (!_bgCache[key]) {
     const img = new Image();
-    img.src = (BG_DEFS[key] || BG_DEFS.dojo).src;
+    img.src = (window.__IMG && window.__IMG[key]) || (BG_DEFS[key] || BG_DEFS.dojo).src;
     _bgCache[key] = img;
   }
   return _bgCache[key];

@@ -119,7 +119,7 @@ function startSession(opts, meta) {
   $('hud-level').textContent = meta.title;
   $('hud-wind').classList.toggle('hidden', session.sway.env.wind === 0);
   // 右下角弓种示意图（真实贴图）
-  $('hud-bow-img').src = `assets/bow-${opts.bowCfg.id}.png`;
+  $('hud-bow-img').src = (window.__IMG && window.__IMG['bow-' + opts.bowCfg.id]) || `assets/bow-${opts.bowCfg.id}.png`;
   $('hud-bow-name').textContent = opts.bowCfg.name;
   updateHud();
 }
