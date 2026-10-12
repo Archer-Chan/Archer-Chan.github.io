@@ -69,7 +69,7 @@ export class Sway {
 }
 
 // ---- 输入抽象 ----
-// aim: 以靶心为原点的偏移(px)。桌面：鼠标移动；手机：陀螺仪 + 触摸微调
+// aim: 以靶心为原点的偏移(px)。桌面：鼠标移动；手机：陀螺仪（竖持校准）+ 触摸微调
 export class AimInput {
   constructor(canvas) {
     this.canvas = canvas;
@@ -77,12 +77,15 @@ export class AimInput {
     this.mouseX = 0; this.mouseY = 0;
     this.trimX = 0; this.trimY = 0;  // 触摸拖拽微调
     this.gyroOn = false;
+    this.gyroGuided = false;         // 是否经过竖持引导校准
     this.gyroX = 0; this.gyroY = 0;
-    this.base = null;                // 陀螺仪校准基准
+    this.base = null;                // 陀螺仪校准基准（竖持姿态）
     this._lastTouch = null;
     this.pxPerDeg = 9;               // 陀螺仪灵敏度（随距离微调）
     this.isCoarse = matchMedia('(pointer: coarse)').matches;
   }
+  // 角度差（处理 0/360 环绕）：返回 a-b 的最短角差，范围 [-180,180]
+  static _angDiff(a, b) { return ((a - b + 540) % 360) - 180; }
   async enableGyro() {
     try {
       if (typeof DeviceOrientationEvent !== 'undefined' &&
@@ -92,11 +95,14 @@ export class AimInput {
       }
       if (typeof DeviceOrientationEvent === 'undefined') return false;
       window.addEventListener('deviceorientation', this._onGyro = (e) => {
-        if (e.beta == null || e.gamma == null) return;
-        if (!this.base) this.base = { beta: e.beta, gamma: e.gamma };
-        // 竖屏：gamma 左右 / beta 前后
-        this.gyroX = (e.gamma - this.base.gamma) * this.pxPerDeg;
-        this.gyroY = (e.beta - this.base.beta) * this.pxPerDeg;
+        if (e.alpha == null || e.beta == null) return;
+        if (!this.base) this.base = { alpha: e.alpha, beta: e.beta };
+        // 竖持：alpha 左右转体（方位角）/ beta 抬压弓（俯仰角）
+        const tx = AimInput._angDiff(e.alpha, this.base.alpha) * this.pxPerDeg;
+        const ty = (e.beta - this.base.beta) * this.pxPerDeg;
+        // 指数滑动平均低通滤波，抑制陀螺仪高频抖动
+        this.gyroX += (tx - this.gyroX) * 0.3;
+        this.gyroY += (ty - this.gyroY) * 0.3;
       });
       this.gyroOn = true;
       return true;
@@ -104,9 +110,20 @@ export class AimInput {
   }
   disableGyro() {
     if (this._onGyro) window.removeEventListener('deviceorientation', this._onGyro);
-    this.gyroOn = false; this.base = null; this.gyroX = this.gyroY = 0;
+    this.gyroOn = false; this.gyroGuided = false;
+    this.base = null; this.gyroX = this.gyroY = 0;
   }
   calibrate() { this.base = null; } // 下一帧陀螺仪数据作为新基准
+  // 等待基准捕获（引导页用）：超时 3s 返回 false
+  waitCalibrated(timeoutMs = 3000) {
+    return new Promise((resolve) => {
+      const t0 = performance.now();
+      const iv = setInterval(() => {
+        if (this.base) { clearInterval(iv); resolve(true); }
+        else if (performance.now() - t0 > timeoutMs) { clearInterval(iv); resolve(false); }
+      }, 80);
+    });
+  }
   bind() {
     const c = this.canvas;
     c.addEventListener('pointermove', (e) => {

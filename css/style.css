@@ -13,7 +13,10 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
-  font-family: var(--sans); font-size: 15px; }
+  font-family: var(--sans); font-size: 15px;
+  /* 移动端触摸加固：禁框选/长按菜单/浏览器手势/滚动回弹 */
+  touch-action: none; overscroll-behavior: none;
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 button { font-family: inherit; color: inherit; background: none; border: none; cursor: pointer; }
 
 #game { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; touch-action: none; }
@@ -178,3 +181,21 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
   .report-body { flex-direction: column; align-items: center; }
   .report-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ---------- 陀螺仪竖持校准引导 ---------- */
+#gyro-guide { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center;
+  justify-content: center; background: rgba(6,8,11,.78); backdrop-filter: blur(6px); }
+.gyro-card { width: min(340px, 86vw); background: var(--panel); border: 1px solid var(--hairline);
+  border-radius: 12px; padding: 26px 24px 22px; text-align: center; }
+.gyro-card h3 { font-size: 17px; margin: 14px 0 8px; }
+.gyro-card p { font-size: 12.5px; color: var(--muted); line-height: 1.8; }
+.gyro-card .panel-actions { margin-top: 18px; }
+.gyro-illu { display: flex; justify-content: center; }
+.gyro-illu svg { width: 96px; height: 96px; }
+.gyro-illu .phone { animation: gyro-nod 2.4s ease-in-out infinite; transform-origin: 48px 78px; }
+@keyframes gyro-nod { 0%,100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+#gyro-guide .gyro-state { margin-top: 10px; font-family: var(--mono); font-size: 11px;
+  color: var(--gold); min-height: 16px; }
+
+/* HUD 陀螺仪重校准按钮 */
+#hud-gyro-recal { margin-left: auto; }

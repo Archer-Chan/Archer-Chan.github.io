@@ -15,6 +15,12 @@ addEventListener('resize', resize); resize();
 const input = new AimInput(canvas);
 input.bind();
 
+// ---------- 移动端触摸加固：禁系统二级菜单 / 框选 / 手势缩放 ----------
+addEventListener('contextmenu', (e) => e.preventDefault());
+addEventListener('selectstart', (e) => e.preventDefault());
+addEventListener('gesturestart', (e) => e.preventDefault());
+addEventListener('dblclick', (e) => e.preventDefault());
+
 // ---------- 屏幕路由 ----------
 const screens = ['home', 'train', 'map', 'report'];
 function show(name) {
@@ -92,11 +98,42 @@ $('train-assist').onclick = (e) => {
   trainCfg.assist = !trainCfg.assist;
   e.target.setAttribute('aria-checked', trainCfg.assist);
 };
-$('btn-gyro').onclick = async (e) => {
-  if (input.gyroOn) { input.disableGyro(); e.target.setAttribute('aria-checked', 'false'); return; }
+// ---------- 陀螺仪：竖持引导校准 ----------
+function setGyroToggle(on) { $('btn-gyro').setAttribute('aria-checked', on ? 'true' : 'false'); }
+$('btn-gyro').onclick = () => {
+  if (input.gyroOn) { input.disableGyro(); setGyroToggle(false); return; }
+  $('gyro-state').textContent = '';
+  $('gyro-guide').classList.remove('hidden');
+};
+$('btn-gyro-cancel').onclick = () => $('gyro-guide').classList.add('hidden');
+$('btn-gyro-cal').onclick = async () => {
+  $('gyro-state').textContent = '正在获取传感器权限…';
   const ok = await input.enableGyro();
-  e.target.setAttribute('aria-checked', ok ? 'true' : 'false');
-  if (!ok) alert('当前设备/浏览器不支持或未授权陀螺仪，可用拖拽瞄准替代。');
+  if (!ok) {
+    $('gyro-guide').classList.add('hidden');
+    alert('当前设备/浏览器不支持或未授权陀螺仪，可用拖拽瞄准替代。');
+    return;
+  }
+  // 以当前竖持姿态为基准零点
+  $('gyro-state').textContent = '保持竖持…正在采样';
+  input.calibrate();
+  const got = await input.waitCalibrated();
+  if (!got) {
+    $('gyro-state').textContent = '未读到传感器数据，请重试';
+    return;
+  }
+  input.gyroGuided = true;
+  $('gyro-guide').classList.add('hidden');
+  setGyroToggle(true);
+};
+// 对局内重校准：按当前朝向重新归零（HUD ◎ 按钮）
+$('hud-gyro-recal').onclick = () => {
+  input.calibrate();
+  const pop = $('shot-popup');
+  pop.textContent = '已校准';
+  pop.className = 'pop';
+  setTimeout(() => pop.classList.add('hidden'), 700);
+  pop.classList.remove('hidden');
 };
 
 // ---------- 对局调度 ----------
@@ -114,8 +151,9 @@ function startSession(opts, meta) {
     bow: session?.bowCfg?.id, assist: session?.assist, fx: session?.fx.length, markDur: session?.markDur,
     last: session?.shots.length ? ((s) => ({ dx: +s.dx.toFixed(1), dy: +s.dy.toFixed(1),
       stickAng: +s.stickAng.toFixed(2), trail: s.trail.length }))(session.shots[session.shots.length - 1]) : null });
-  input.calibrate();
+  if (!input.gyroGuided) input.calibrate(); // 竖持引导校准后不再静默重归零
   $('hud').classList.remove('hidden');
+  $('hud-gyro-recal').classList.toggle('hidden', !input.gyroOn);
   $('hud-level').textContent = meta.title;
   $('hud-wind').classList.toggle('hidden', session.sway.env.wind === 0);
   // 右下角弓种示意图（真实贴图）

@@ -33,6 +33,7 @@
       <span id="hud-wind-v" class="hud-num"></span>
       <span id="hud-wind-arrow"></span>
     </div>
+    <button id="hud-gyro-recal" class="icon-btn hidden" title="按当前竖持朝向重新校准准星">◎</button>
   </div>
   <div class="hud-bottom">
     <div class="steady-wrap">
@@ -163,6 +164,31 @@
     </div>
   </section>
 
+</div>
+
+<!-- 陀螺仪竖持校准引导 -->
+<div id="gyro-guide" class="hidden">
+  <div class="gyro-card">
+    <div class="gyro-illu">
+      <svg viewBox="0 0 96 96">
+        <g class="phone">
+          <rect x="34" y="18" width="28" height="56" rx="5" fill="none" stroke="#ece7dd" stroke-width="2"/>
+          <circle cx="48" cy="68" r="2" fill="#ece7dd"/>
+          <circle cx="48" cy="40" r="7" fill="none" stroke="#ff5f1f" stroke-width="1.6"/>
+          <circle cx="48" cy="40" r="1.6" fill="#ff5f1f"/>
+        </g>
+        <line x1="20" y1="84" x2="76" y2="84" stroke="#8d8c88" stroke-width="1.4" stroke-dasharray="3 3"/>
+        <text x="48" y="12" text-anchor="middle" fill="#8d8c88" font-size="8">竖直持机</text>
+      </svg>
+    </div>
+    <h3>竖持校准</h3>
+    <p>将手机<b>竖直举起</b>，像持弓一样对准前方靶位的方向。<br>准星将以此刻的朝向与姿态为基准零点。</p>
+    <div class="gyro-state" id="gyro-state"></div>
+    <div class="panel-actions">
+      <button class="btn ghost" id="btn-gyro-cancel">取消</button>
+      <button class="btn primary" id="btn-gyro-cal">校准就位</button>
+    </div>
+  </div>
 </div>
 
 <script src="js/imgdata/dojo.js"></script>
