@@ -60,7 +60,7 @@ function pills(el, items, key, fmt, persistKey) {
     el.appendChild(b);
   }
 }
-const ENV_NAMES = { indoor: '室内', breeze: '户外微风', windy: '户外阵风' };
+const ENV_NAMES = { indoor: '室内', breeze: '户外微风', windy: '户外阵风', ar: '实景 AR' };
 const SCALE_DESCS = {
   sport: '竞技：可读性优先，靶面按场景透视缩放，远靶仍清晰可见。',
   real: '写实：还原 25cm 持机视距下的真实张角——远靶会只有指甲盖大，请配合瞄具放大与右上监视器。'
@@ -90,7 +90,7 @@ function renderTrainForm() {
   if (isComp) pills($('train-face'), ['std', 'small'], 'face', v => v === 'std' ? '标准靶纸' : '小尺寸靶纸');
   pills($('train-scale'), ['sport', 'real'], 'scaleMode', v => v === 'sport' ? '竞技' : '写实', 'xj_scale');
   $('scale-desc').textContent = SCALE_DESCS[trainCfg.scaleMode];
-  pills($('train-env'), ['indoor', 'breeze', 'windy'], 'env', v => ENV_NAMES[v]);
+  pills($('train-env'), ['indoor', 'breeze', 'windy', 'ar'], 'env', v => ENV_NAMES[v]);
   pills($('train-arrows'), [3, 6, 12], 'arrows', v => v + ' 支');
   $('train-assist').setAttribute('aria-checked', trainCfg.assist);
 }
@@ -135,6 +135,28 @@ $('hud-gyro-recal').onclick = () => {
   setTimeout(() => pop.classList.add('hidden'), 700);
   pop.classList.remove('hidden');
 };
+
+// ---------- 实景模式：后置摄像头采集 ----------
+let camStream = null;
+async function startCam() {
+  if (camStream) return true;
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    const v = $('cam');
+    v.srcObject = camStream;
+    await v.play().catch(() => {});
+    window.__camVideo = v;
+    return true;
+  } catch { camStream = null; return false; }
+}
+function stopCam() {
+  if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
+  window.__camVideo = null;
+  input.arMode = false;
+}
 
 // ---------- 对局调度 ----------
 // 场景映射：闯关按秘境（青松谷/雪岭/星坠荒原各有专属背景），训练按弓种
@@ -207,7 +229,7 @@ canvas.addEventListener('pointerdown', (e) => {
 });
 addEventListener('pointerup', () => { if (session) session.release(input); });
 addEventListener('pointercancel', () => { if (session) session.release(input); });
-$('hud-exit').onclick = () => { endSession(); show(sessionMeta?.mode === 'quest' ? 'map' : 'train'); if (!sessionMeta) show('home'); };
+$('hud-exit').onclick = () => { endSession(); stopCam(); show(sessionMeta?.mode === 'quest' ? 'map' : 'train'); if (!sessionMeta) show('home'); };
 
 // ---------- 报告 ----------
 function showReport(shots, total) {
@@ -386,15 +408,34 @@ $('btn-map-reset').onclick = () => {
     renderMap();
   }
 };
-$('btn-train-start').onclick = () => startSession(
-  { dist: trainCfg.dist, env: trainCfg.env, arrows: trainCfg.arrows, theme: BOW_BG[trainCfg.bow],
-    moving: 0, assist: trainCfg.assist, bowCfg: BOWS[trainCfg.bow],
-    faceScale: trainCfg.bow === 'compound' ? FACE_SCALE[trainCfg.face] : 1,
-    scaleMode: trainCfg.scaleMode },
-  { mode: 'train', title: `${BOWS[trainCfg.bow].name} · ${trainCfg.dist}m · ${ENV_NAMES[trainCfg.env]}`,
-    dist: trainCfg.dist, bg: BOW_BG[trainCfg.bow], scaleMode: trainCfg.scaleMode }
-);
+$('btn-train-start').onclick = async () => {
+  const useAr = trainCfg.env === 'ar';
+  if (useAr) {
+    const ok = await startCam();
+    if (!ok) {
+      alert('无法开启摄像头（需要 HTTPS 环境并授权），已回退为室内场景。');
+      trainCfg.env = 'indoor';
+      renderTrainForm();
+      return;
+    }
+    input.arMode = true;
+    // 实景以陀螺仪锚定靶位方向；未开启时靶面固定在画面中央，仍可触摸微调游玩
+    if (!input.gyroOn) input.calibrate();
+  } else {
+    stopCam();
+  }
+  const theme = useAr ? 'ar' : BOW_BG[trainCfg.bow];
+  startSession(
+    { dist: trainCfg.dist, env: trainCfg.env, arrows: trainCfg.arrows, theme,
+      moving: 0, assist: trainCfg.assist, bowCfg: BOWS[trainCfg.bow],
+      faceScale: trainCfg.bow === 'compound' ? FACE_SCALE[trainCfg.face] : 1,
+      scaleMode: trainCfg.scaleMode },
+    { mode: 'train', title: `${BOWS[trainCfg.bow].name} · ${trainCfg.dist}m · ${ENV_NAMES[trainCfg.env]}`,
+      dist: trainCfg.dist, bg: theme, scaleMode: trainCfg.scaleMode }
+  );
+};
 $('btn-report-back').onclick = () => {
+  stopCam();
   if (sessionMeta?.mode === 'quest') { renderMap(); show('map'); } else show('train');
 };
 $('btn-report-again').onclick = () => {

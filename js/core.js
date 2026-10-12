@@ -20,8 +20,13 @@ export function vnoise(t, seed = 0) {
 export const ENVS = {
   indoor: { name: '室内',   breath: 5.0, tremor: 1.1, drift: 2.5, gust: 0,  wind: 0 },
   breeze: { name: '户外微风', breath: 6.0, tremor: 1.3, drift: 3.5, gust: 9,  wind: 1.6 },
-  windy:  { name: '户外阵风', breath: 7.5, tremor: 1.7, drift: 5.5, gust: 24, wind: 4.2 }
+  windy:  { name: '户外阵风', breath: 7.5, tremor: 1.7, drift: 5.5, gust: 24, wind: 4.2 },
+  // 实景 AR：手持真实晃动（无环境风）
+  ar:     { name: '实景',   breath: 4.5, tremor: 1.0, drift: 2.5, gust: 0,  wind: 0 }
 };
+
+// 实景模式摄像头水平视场（度），用于陀螺转角 → 屏幕像素换算
+export const AR_FOV_X = 67;
 
 // ---- 弓种：瞄具形态 + 手感参数 ----
 // swayMul 晃动倍率 / fatigueMul 疲劳增速倍率 / dropMul 下落倍率 / zoom 视野放大
@@ -83,6 +88,8 @@ export class AimInput {
     this._lastTouch = null;
     this.pxPerDeg = 9;               // 陀螺仪灵敏度（随距离微调）
     this.isCoarse = matchMedia('(pointer: coarse)').matches;
+    this.arMode = false;             // 实景模式：准星=触摸微调，世界平移=陀螺转角
+    this.worldX = 0; this.worldY = 0; // 世界锚定平移（px，按摄像头视场换算）
   }
   // 角度差（处理 0/360 环绕）：返回 a-b 的最短角差，范围 [-180,180]
   static _angDiff(a, b) { return ((a - b + 540) % 360) - 180; }
@@ -146,9 +153,18 @@ export class AimInput {
     c.addEventListener('pointercancel', end);
   }
   read() {
+    const lim = Math.min(innerWidth, innerHeight) * 0.46;
+    if (this.arMode) {
+      // 实景：陀螺转角换算为世界平移（靶面锚定在真实方向），准星只由触摸微调驱动
+      const k = innerWidth / AR_FOV_X; // 摄像头 1° ≈ 多少 px
+      this.worldX = (this.gyroX / this.pxPerDeg) * k;
+      this.worldY = (this.gyroY / this.pxPerDeg) * k;
+      this.x = clamp(this.trimX, -lim, lim);
+      this.y = clamp(this.trimY, -lim, lim);
+      return this;
+    }
     const gx = this.gyroOn ? this.gyroX : this.mouseX;
     const gy = this.gyroOn ? this.gyroY : this.mouseY;
-    const lim = Math.min(innerWidth, innerHeight) * 0.46;
     this.x = clamp(gx + this.trimX, -lim, lim);
     this.y = clamp(gy + this.trimY, -lim, lim);
     return this;

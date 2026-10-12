@@ -1,5 +1,5 @@
 // 渲染引擎：主题场景（AI 背景图）、靶面、箭矢飞行、对局会话（训练/闯关共用）
-import { clamp, lerp, vnoise, Sway, sfx } from './core.js';
+import { clamp, lerp, vnoise, Sway, sfx, AR_FOV_X } from './core.js';
 
 // ---------- 场景背景（AI 素材 + 透视标定） ----------
 // bx/by/br：背景中烘焙靶心的相对位置与半径（相对 1216 高）；refDist：该尺寸对应的参考距离
@@ -22,6 +22,9 @@ export const BG_DEFS = {
              panel: ['#5a6b8c', '#33405a'], particle: 'snow',  targetStyle: 'straw', sizeMul: 1 },
   astra:   { src: 'assets/bg-astra.png',   bx: 0.502, by: 0.386, br: 0.045, refDist: 70,
              panel: ['#3a2d6e', '#1c1540'], particle: 'spark', targetStyle: 'astra', sizeMul: 1 },
+  // 实景 AR：摄像头画面做底（无背景图），靶面纸质感 + 赛事靶架
+  ar:      { src: null,                    bx: 0.500, by: 0.460, br: 0.028, refDist: 30,
+             panel: ['#2c2f36', '#17191e'], particle: null,    targetStyle: 'paper', sizeMul: 1 },
 };
 export function bgScale(w, h) { return Math.max(w / BG_IMG_W, h / BG_IMG_H); }
 // 靶面外圈（10 环外沿）像素半径。
@@ -30,6 +33,11 @@ export function bgScale(w, h) { return Math.max(w / BG_IMG_W, h / BG_IMG_H); }
 //   半径 = 250mm·D/(2·L)/0.2646 ≈ 472.7·D/L，D 为靶面真实直径（纸靶 122cm / 布靶 80cm）
 export function outerR(dist, bgKey, w, h, mode = 'sport') {
   const c = BG_DEFS[bgKey] || BG_DEFS.dojo;
+  if (bgKey === 'ar') {
+    // 实景：按摄像头水平视场的真实张角（1.22m 靶纸），1.5× 可读性放大
+    const k = w / AR_FOV_X; // 1° ≈ 多少 px
+    return Math.max(6, Math.atan(0.61 / dist) * (180 / Math.PI) * k * 1.5);
+  }
   if (mode === 'real') {
     const D = c.targetStyle === 'paper' ? 1.22 : 0.80;
     return Math.max(5, 472.7 * D / dist);
@@ -55,7 +63,7 @@ export class Scene {
   constructor(bgKey) {
     this.key = BG_DEFS[bgKey] ? bgKey : 'dojo';
     this.def = BG_DEFS[this.key];
-    this.img = bgImage(this.key);
+    this.img = this.def.src ? bgImage(this.key) : null;
     this.particles = [];
     for (let i = 0; i < 45; i++) this.particles.push(this._spawn(true));
   }
@@ -69,11 +77,27 @@ export class Scene {
   }
   // 背景烘焙靶锚点的屏幕坐标（含视差平移），供靶面/弹孔对齐
   anchor(w, h, panX = 0, panY = 0) {
+    if (this.key === 'ar') return { x: w / 2 + panX, y: h * 0.46 + panY };
     const s = bgScale(w, h);
     const dx = (w - BG_IMG_W * s) / 2 + panX, dy = (h - BG_IMG_H * s) / 2 + panY;
     return { x: this.def.bx * BG_IMG_W * s + dx, y: this.def.by * BG_IMG_H * s + dy };
   }
   draw(ctx, w, h, t, panX = 0, panY = 0) {
+    if (this.key === 'ar') {
+      // 实景：摄像头画面全屏铺满（cover），画面随手机转动天然旋转，无需平移
+      const v = window.__camVideo;
+      if (v && v.readyState >= 2 && v.videoWidth > 0) {
+        const s = Math.max(w / v.videoWidth, h / v.videoHeight);
+        const dw = v.videoWidth * s, dh = v.videoHeight * s;
+        ctx.drawImage(v, (w - dw) / 2, (h - dh) / 2, dw, dh);
+      } else {
+        ctx.fillStyle = '#0b0d11'; ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = 'rgba(236,231,221,.45)';
+        ctx.font = '13px -apple-system, "PingFang SC", sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('正在等待摄像头画面…', w / 2, h * 0.42);
+      }
+      return;
+    }
     const s = bgScale(w, h);
     const dx = (w - BG_IMG_W * s) / 2 + panX, dy = (h - BG_IMG_H * s) / 2 + panY;
     if (this.img.complete && this.img.naturalWidth > 0) {
@@ -768,8 +792,14 @@ export class RangeSession {
     this.sway.update(dt, this.state === 'drawing' ? this.holdSec : 0);
     this.stateT += dt;
     // 视差平移：世界随瞄准点轻微反向移动（目标/背景一体）
-    this.panX = -(input.x + this.sway.x) * 0.10;
-    this.panY = -(input.y + this.sway.y) * 0.10;
+    // 实景模式：靶面锚定在真实方向——陀螺转角整体平移靶位，准星留在屏幕中心附近
+    if (this.theme === 'ar') {
+      this.panX = -(input.worldX || 0);
+      this.panY = -(input.worldY || 0);
+    } else {
+      this.panX = -(input.x + this.sway.x) * 0.10;
+      this.panY = -(input.y + this.sway.y) * 0.10;
+    }
     if (this.state === 'intro') {
       this.introT += dt;
       if (this.introT >= this.introDur) { this.state = 'idle'; this.stateT = 0; }
