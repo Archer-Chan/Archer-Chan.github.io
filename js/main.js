@@ -1,5 +1,5 @@
 // 主控：屏幕路由、对局调度、训练报告、闯关地图
-import { clamp, AimInput, sfx, BOWS } from './core.js';
+import { clamp, AimInput, sfx, BOWS, setArFov } from './core.js';
 import { Scene, RangeSession, drawTarget, outerR } from './engine.js';
 import { ZONES, LEVELS, loadProgress, saveProgress, starsOf, isUnlocked } from './levels.js';
 
@@ -36,7 +36,8 @@ function hideScreens() {
 // ---------- 训练设置 ----------
 const trainCfg = { dist: 18, env: 'indoor', arrows: 6, assist: true, face: 'std',
   bow: localStorage.getItem('xj_bow') || 'recurve',
-  scaleMode: localStorage.getItem('xj_scale') || 'sport' };
+  scaleMode: localStorage.getItem('xj_scale') || 'sport',
+  arfov: +(localStorage.getItem('xj_arfov') || 67) };
 if (!BOWS[trainCfg.bow]) trainCfg.bow = 'recurve';
 if (!['sport', 'real'].includes(trainCfg.scaleMode)) trainCfg.scaleMode = 'sport';
 // 靶纸缩放（仅奥运赛场/复合弓）：标准 122cm 靶面，小靶≈80cm
@@ -91,6 +92,26 @@ function renderTrainForm() {
   pills($('train-scale'), ['sport', 'real'], 'scaleMode', v => v === 'sport' ? '竞技' : '写实', 'xj_scale');
   $('scale-desc').textContent = SCALE_DESCS[trainCfg.scaleMode];
   pills($('train-env'), ['indoor', 'breeze', 'windy', 'ar'], 'env', v => ENV_NAMES[v]);
+  // 实景视场角：靶面与实景贴合校准（陀螺转角→像素换算），仅实景模式显示
+  const isAr = trainCfg.env === 'ar';
+  $('arfov-row').classList.toggle('hidden', !isAr);
+  if (isAr) {
+    setArFov(trainCfg.arfov);
+    const fovEl = $('train-arfov');
+    fovEl.innerHTML = '';
+    for (const v of [55, 67, 78]) {
+      const b = document.createElement('button');
+      b.className = 'pill' + (trainCfg.arfov === v ? ' on' : '');
+      b.textContent = v + '°';
+      b.onclick = () => {
+        trainCfg.arfov = v;
+        localStorage.setItem('xj_arfov', v);
+        setArFov(v);
+        renderTrainForm();
+      };
+      fovEl.appendChild(b);
+    }
+  }
   pills($('train-arrows'), [3, 6, 12], 'arrows', v => v + ' 支');
   $('train-assist').setAttribute('aria-checked', trainCfg.assist);
 }

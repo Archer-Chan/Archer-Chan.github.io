@@ -1,5 +1,5 @@
 // 渲染引擎：主题场景（AI 背景图）、靶面、箭矢飞行、对局会话（训练/闯关共用）
-import { clamp, lerp, vnoise, Sway, sfx, AR_FOV_X } from './core.js';
+import { clamp, lerp, vnoise, Sway, sfx, AR_FOV } from './core.js';
 
 // ---------- 场景背景（AI 素材 + 透视标定） ----------
 // bx/by/br：背景中烘焙靶心的相对位置与半径（相对 1216 高）；refDist：该尺寸对应的参考距离
@@ -35,7 +35,7 @@ export function outerR(dist, bgKey, w, h, mode = 'sport') {
   const c = BG_DEFS[bgKey] || BG_DEFS.dojo;
   if (bgKey === 'ar') {
     // 实景：按摄像头水平视场的真实张角（1.22m 靶纸），1.5× 可读性放大
-    const k = w / AR_FOV_X; // 1° ≈ 多少 px
+    const k = w / AR_FOV; // 1° ≈ 多少 px
     return Math.max(6, Math.atan(0.61 / dist) * (180 / Math.PI) * k * 1.5);
   }
   if (mode === 'real') {

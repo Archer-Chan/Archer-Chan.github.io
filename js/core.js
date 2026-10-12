@@ -25,8 +25,22 @@ export const ENVS = {
   ar:     { name: '实景',   breath: 4.5, tremor: 1.0, drift: 2.5, gust: 0,  wind: 0 }
 };
 
-// 实景模式摄像头水平视场（度），用于陀螺转角 → 屏幕像素换算
-export const AR_FOV_X = 67;
+// 实景模式摄像头水平视场（度，可调），用于陀螺转角 → 屏幕像素换算
+export let AR_FOV = 67;
+export function setArFov(f) { if (f >= 40 && f <= 100) AR_FOV = f; }
+
+// 欧拉角（ZXY 内旋，deviceorientation 规范）→ 旋转矩阵
+function _e2m(a, b, g) {
+  const d = Math.PI / 180;
+  a *= d; b *= d; g *= d;
+  const ca = Math.cos(a), sa = Math.sin(a), cb = Math.cos(b), sb = Math.sin(b),
+        cg = Math.cos(g), sg = Math.sin(g);
+  return [
+    [ca * cg - sa * sb * sg, -cb * sa, ca * sg + cg * sa * sb],
+    [cg * sa + ca * sb * sg, ca * cb, sa * sg - ca * cg * sb],
+    [-cb * sg, sb, cb * cg]
+  ];
+}
 
 // ---- 弓种：瞄具形态 + 手感参数 ----
 // swayMul 晃动倍率 / fatigueMul 疲劳增速倍率 / dropMul 下落倍率 / zoom 视野放大
@@ -84,15 +98,13 @@ export class AimInput {
     this.gyroOn = false;
     this.gyroGuided = false;         // 是否经过竖持引导校准
     this.gyroX = 0; this.gyroY = 0;
-    this.base = null;                // 陀螺仪校准基准（竖持姿态）
+    this.baseM = null;               // 陀螺仪校准基准（竖持姿态，旋转矩阵）
     this._lastTouch = null;
     this.pxPerDeg = 9;               // 陀螺仪灵敏度（随距离微调）
     this.isCoarse = matchMedia('(pointer: coarse)').matches;
     this.arMode = false;             // 实景模式：准星=触摸微调，世界平移=陀螺转角
     this.worldX = 0; this.worldY = 0; // 世界锚定平移（px，按摄像头视场换算）
   }
-  // 角度差（处理 0/360 环绕）：返回 a-b 的最短角差，范围 [-180,180]
-  static _angDiff(a, b) { return ((a - b + 540) % 360) - 180; }
   async enableGyro() {
     try {
       if (typeof DeviceOrientationEvent !== 'undefined' &&
@@ -103,14 +115,32 @@ export class AimInput {
       if (typeof DeviceOrientationEvent === 'undefined') return false;
       window.addEventListener('deviceorientation', this._onGyro = (e) => {
         if (e.alpha == null || e.beta == null) return;
-        if (!this.base) this.base = { alpha: e.alpha, beta: e.beta };
-        // 竖持：alpha 左右转体（方位角）/ beta 抬压弓（俯仰角）
-        // 取反：转体方向与屏幕坐标系相反；抬弓时 beta 增大但准星应上移（屏幕 y 为负）
-        const tx = -AimInput._angDiff(e.alpha, this.base.alpha) * this.pxPerDeg;
-        const ty = -(e.beta - this.base.beta) * this.pxPerDeg;
-        // 指数滑动平均低通滤波，抑制陀螺仪高频抖动
-        this.gyroX += (tx - this.gyroX) * 0.3;
-        this.gyroY += (ty - this.gyroY) * 0.3;
+        const M = _e2m(e.alpha, e.beta, e.gamma || 0);
+        if (!this.baseM) this.baseM = M;
+        // 相对旋转 R = baseMᵀ·M，提取旋转向量（轴角）：
+        // 竖持时「左右转体 = 绕设备 Y 轴」「抬压弓 = 绕设备 X 轴」，
+        // 直接取旋转向量的 y/x 分量——绕开竖持 beta≈90° 的欧拉角奇异点，
+        // 且水平灵敏度不随持机俯仰角衰减（ZXY 分解会错误衰减）
+        const B = this.baseM, d = 180 / Math.PI;
+        const R = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+        for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++)
+          R[i][j] = B[0][i] * M[0][j] + B[1][i] * M[1][j] + B[2][i] * M[2][j];
+        const tr = R[0][0] + R[1][1] + R[2][2];
+        const th = Math.acos(Math.max(-1, Math.min(1, (tr - 1) / 2)));
+        let rx, ry;
+        if (th < 1e-4) { rx = (R[2][1] - R[1][2]) / 2; ry = (R[0][2] - R[2][0]) / 2; }
+        else {
+          const s = 2 * Math.sin(th);
+          rx = (R[2][1] - R[1][2]) / s * th;
+          ry = (R[0][2] - R[2][0]) / s * th;
+        }
+        // 取反：转体/抬弓方向与屏幕坐标系相反（抬弓准星应上移，屏幕 y 为负）
+        const tx = -ry * d * this.pxPerDeg;
+        const ty = -rx * d * this.pxPerDeg;
+        // 指数滑动平均低通滤波：实景模式加重滤波，世界锚定的靶面对噪声更敏感
+        const sm = this.arMode ? 0.12 : 0.3;
+        this.gyroX += (tx - this.gyroX) * sm;
+        this.gyroY += (ty - this.gyroY) * sm;
       });
       this.gyroOn = true;
       return true;
@@ -119,15 +149,15 @@ export class AimInput {
   disableGyro() {
     if (this._onGyro) window.removeEventListener('deviceorientation', this._onGyro);
     this.gyroOn = false; this.gyroGuided = false;
-    this.base = null; this.gyroX = this.gyroY = 0;
+    this.baseM = null; this.gyroX = this.gyroY = 0;
   }
-  calibrate() { this.base = null; } // 下一帧陀螺仪数据作为新基准
+  calibrate() { this.baseM = null; } // 下一帧陀螺仪数据作为新基准
   // 等待基准捕获（引导页用）：超时 3s 返回 false
   waitCalibrated(timeoutMs = 3000) {
     return new Promise((resolve) => {
       const t0 = performance.now();
       const iv = setInterval(() => {
-        if (this.base) { clearInterval(iv); resolve(true); }
+        if (this.baseM) { clearInterval(iv); resolve(true); }
         else if (performance.now() - t0 > timeoutMs) { clearInterval(iv); resolve(false); }
       }, 80);
     });
@@ -156,7 +186,7 @@ export class AimInput {
     const lim = Math.min(innerWidth, innerHeight) * 0.46;
     if (this.arMode) {
       // 实景：陀螺转角换算为世界平移（靶面锚定在真实方向），准星只由触摸微调驱动
-      const k = innerWidth / AR_FOV_X; // 摄像头 1° ≈ 多少 px
+      const k = innerWidth / AR_FOV; // 摄像头 1° ≈ 多少 px
       this.worldX = (this.gyroX / this.pxPerDeg) * k;
       this.worldY = (this.gyroY / this.pxPerDeg) * k;
       this.x = clamp(this.trimX, -lim, lim);
