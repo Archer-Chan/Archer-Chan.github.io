@@ -98,8 +98,9 @@ export class AimInput {
         if (e.alpha == null || e.beta == null) return;
         if (!this.base) this.base = { alpha: e.alpha, beta: e.beta };
         // 竖持：alpha 左右转体（方位角）/ beta 抬压弓（俯仰角）
-        const tx = AimInput._angDiff(e.alpha, this.base.alpha) * this.pxPerDeg;
-        const ty = (e.beta - this.base.beta) * this.pxPerDeg;
+        // 取反：转体方向与屏幕坐标系相反；抬弓时 beta 增大但准星应上移（屏幕 y 为负）
+        const tx = -AimInput._angDiff(e.alpha, this.base.alpha) * this.pxPerDeg;
+        const ty = -(e.beta - this.base.beta) * this.pxPerDeg;
         // 指数滑动平均低通滤波，抑制陀螺仪高频抖动
         this.gyroX += (tx - this.gyroX) * 0.3;
         this.gyroY += (ty - this.gyroY) * 0.3;
