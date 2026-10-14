@@ -1,7 +1,13 @@
 // 主控：屏幕路由、对局调度、训练报告、闯关地图
-import { clamp, AimInput, sfx, BOWS, setArFov } from './core.js';
-import { Scene, RangeSession, drawTarget, outerR } from './engine.js';
-import { ZONES, LEVELS, loadProgress, saveProgress, starsOf, isUnlocked } from './levels.js';
+import { AimInput } from './core.js';
+import { Scene, RangeSession, drawTarget } from './engine.js';
+import { outerR } from './shared/score.js';
+import { sfx, setSfxProvider } from './shared/sfx.js';
+import { setArFov } from './shared/pose.js';
+import { ZONES, LEVELS, BOWS, starsOf, isUnlocked } from './shared/data.js';
+import { loadProgress, saveProgress } from './levels.js';
+
+setSfxProvider(() => new (window.AudioContext || window.webkitAudioContext)());
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('game'), ctx = canvas.getContext('2d');
@@ -183,7 +189,7 @@ function stopCam() {
 // 场景映射：闯关按秘境（青松谷/雪岭/星坠荒原各有专属背景），训练按弓种
 const ZONE_BG = { forest: 'forest', snow: 'snow', astra: 'astra' };
 const BOW_BG = { trad: 'hanfu', recurve: 'dojo', compound: 'olympic' };
-let session = null, sessionMeta = null;
+let session = null, sessionMeta = null, reportNextLv = null;
 function startSession(opts, meta) {
   hideScreens();
   session = new RangeSession(opts);
@@ -210,7 +216,7 @@ function endSession() {
 }
 function updateHud() {
   if (!session) return;
-  $('hud-arrows').textContent = `× ${session.arrows - session.shots.length}`;
+  $('hud-arrows').textContent = `已射 ${session.shots.length} · 待射 ${session.arrows - session.shots.length}`;
   $('hud-score').textContent = session.total;
   if (session.sway.env.wind > 0) {
     $('hud-wind-v').textContent = session.sway.env.wind.toFixed(1) + ' m/s';
@@ -280,14 +286,17 @@ function showReport(shots, total) {
 
   // 小结建议
   const tips = [];
+  reportNextLv = null;
   if (meta.mode === 'quest') {
     const lv = meta.level, stars = starsOf(lv, total);
     if (stars > 0) {
       tips.push(`通关！获得 ${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}，下一关已解锁。`);
       const p = loadProgress();
       if ((p[lv.id]?.stars || 0) < stars) { p[lv.id] = { stars, best: total }; saveProgress(p); }
+      reportNextLv = LEVELS.find(l => l.id === lv.id + 1) || null;
     } else tips.push(`距离过关还差 ${lv.pass - total} 环，再试一次。`);
   }
+  $('btn-report-next').classList.toggle('hidden', !reportNextLv);
   if (groupRings < 2 && Math.hypot(mx, my) / sessionRingR(shots) > 3)
     tips.push('散布集中但整体偏离靶心——一致性很好，调整瞄准基准点即可。');
   if (steadyAvg < 60) tips.push('稳定度偏低：试着在拉满后 2–4 秒内完成撒放，拖得越久晃动越大。');
@@ -393,7 +402,7 @@ function startLevel(lv) {
 
 // ---------- 主循环 ----------
 const idleScenes = { home: new Scene('hanfu') };
-let last = performance.now();
+let last = Date.now();
 function step(dt, now) {
   const t = now / 1000;
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -414,7 +423,7 @@ function frame(now) {
 requestAnimationFrame(frame);
 // 调试/测试钩子：手动推进游戏循环（用于无 rAF 的环境）
 window.__step = (n = 1, dtms = 16.7) => {
-  for (let i = 0; i < n; i++) step(dtms / 1000, performance.now() + i * dtms);
+  for (let i = 0; i < n; i++) step(dtms / 1000, Date.now() + i * dtms);
 };
 
 // ---------- 路由绑定 ----------
@@ -463,4 +472,5 @@ $('btn-report-again').onclick = () => {
   if (sessionMeta?.mode === 'quest') startLevel(sessionMeta.level);
   else $('btn-train-start').onclick();
 };
+$('btn-report-next').onclick = () => { if (reportNextLv) startLevel(reportNextLv); };
 show('home');

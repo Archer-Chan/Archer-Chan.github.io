@@ -1,61 +1,25 @@
 // 渲染引擎：主题场景（AI 背景图）、靶面、箭矢飞行、对局会话（训练/闯关共用）
-import { clamp, lerp, vnoise, Sway, sfx, AR_FOV } from './core.js';
+// 平台钩子由宿主注入：web 在 main.js、小程序在 adapter，见 setPlatform
+import { clamp, lerp } from './shared/math.js';
+import { Sway } from './shared/sway.js';
+import { sfx } from './shared/sfx.js';
+import { BG_DEFS } from './shared/data.js';
+import { BG_IMG_W, BG_IMG_H, bgScale, outerR, scoreOf } from './shared/score.js';
 
-// ---------- 场景背景（AI 素材 + 透视标定） ----------
-// bx/by/br：背景中烘焙靶心的相对位置与半径（相对 1216 高）；refDist：该尺寸对应的参考距离
-// 游戏靶面由 Canvas 按 refDist/dist 缩放实时绘制，近大远小，覆盖烘焙靶
-export const BG_IMG_W = 832, BG_IMG_H = 1216;
-export const BG_DEFS = {
-  // targetStyle: cloth=布纹靶面+剁草麻布木腿靶垛 / paper=纸张靶面+赛事靶架
-  //              straw=草靶（螺旋草纹+草靶垛+A字木腿）/ astra=星辉金环靶+符文浮盘
-  // sizeMul: 场景靶面整体缩放修正（奥运场景按透视应更小）
-  dojo:    { src: 'assets/bg-dojo.png',    bx: 0.500, by: 0.505, br: 0.028, refDist: 30,
-             panel: ['#4a3826', '#2c2116'], particle: 'mote',  targetStyle: 'cloth', sizeMul: 1 },
-  hanfu:   { src: 'assets/bg-hanfu.png',   bx: 0.500, by: 0.512, br: 0.038, refDist: 50,
-             panel: ['#c8b184', '#8f7a50'], particle: 'petal', targetStyle: 'cloth', sizeMul: 1 },
-  olympic: { src: 'assets/bg-olympic.png', bx: 0.500, by: 0.435, br: 0.045, refDist: 70,
-             panel: ['#2a5a9c', '#173a66'], particle: null,    targetStyle: 'paper', sizeMul: 0.55 },
-  // 巡回之旅三秘境（mockup3 v2 烘焙背景，前景无弓）
-  forest:  { src: 'assets/bg-forest.png',  bx: 0.502, by: 0.485, br: 0.064, refDist: 24,
-             panel: ['#3c5a34', '#23351e'], particle: 'leaf',  targetStyle: 'straw', sizeMul: 1 },
-  snow:    { src: 'assets/bg-snow.png',    bx: 0.505, by: 0.421, br: 0.072, refDist: 50,
-             panel: ['#5a6b8c', '#33405a'], particle: 'snow',  targetStyle: 'straw', sizeMul: 1 },
-  astra:   { src: 'assets/bg-astra.png',   bx: 0.502, by: 0.386, br: 0.045, refDist: 70,
-             panel: ['#3a2d6e', '#1c1540'], particle: 'spark', targetStyle: 'astra', sizeMul: 1 },
-  // 实景 AR：摄像头画面做底（无背景图），靶面纸质感 + 赛事靶架
-  ar:      { src: null,                    bx: 0.500, by: 0.460, br: 0.028, refDist: 30,
-             panel: ['#2c2f36', '#17191e'], particle: null,    targetStyle: 'paper', sizeMul: 1 },
+// 平台钩子：viewport() 视口尺寸 / image(key,def) 背景图创建 / cameraFrame() 实景摄像头画面
+const P = {
+  viewport: () => ({ w: innerWidth, h: innerHeight }),
+  image: (key, def) => { const img = new Image(); img.src = (window.__IMG && window.__IMG[key]) || def.src; return img; },
+  cameraFrame: () => window.__camVideo || null,
 };
-export function bgScale(w, h) { return Math.max(w / BG_IMG_W, h / BG_IMG_H); }
-// 靶面外圈（10 环外沿）像素半径。
-// mode='sport'（竞技）：背景烘焙靶在参考距离恰好被覆盖，其余距离按透视缩放，钳制 [0.45,1.9]；
-// mode='real'（写实）：按 25cm 持机视距还原真实张角（1 CSS px ≈ 0.2646mm），
-//   半径 = 250mm·D/(2·L)/0.2646 ≈ 472.7·D/L，D 为靶面真实直径（纸靶 122cm / 布靶 80cm）
-export function outerR(dist, bgKey, w, h, mode = 'sport') {
-  const c = BG_DEFS[bgKey] || BG_DEFS.dojo;
-  if (bgKey === 'ar') {
-    // 实景：按摄像头水平视场的真实张角（1.22m 靶纸），1.5× 可读性放大
-    const k = w / AR_FOV; // 1° ≈ 多少 px
-    return Math.max(6, Math.atan(0.61 / dist) * (180 / Math.PI) * k * 1.5);
-  }
-  if (mode === 'real') {
-    const D = c.targetStyle === 'paper' ? 1.22 : 0.80;
-    return Math.max(5, 472.7 * D / dist);
-  }
-  const k = Math.min(1.9, Math.max(0.45, c.refDist / dist));
-  return c.br * BG_IMG_H * bgScale(w, h) * k * (c.sizeMul || 1);
-}
+export function setPlatform(p) { Object.assign(P, p); }
 
 // 箭矢飞行时长（秒）：0.65 → 0.32，速度感提升约一倍
 const FLIGHT_T = 0.32;
 
 const _bgCache = {};
 function bgImage(key) {
-  if (!_bgCache[key]) {
-    const img = new Image();
-    img.src = (window.__IMG && window.__IMG[key]) || (BG_DEFS[key] || BG_DEFS.dojo).src;
-    _bgCache[key] = img;
-  }
+  if (!_bgCache[key]) _bgCache[key] = P.image(key, BG_DEFS[key] || BG_DEFS.dojo);
   return _bgCache[key];
 }
 
@@ -85,7 +49,7 @@ export class Scene {
   draw(ctx, w, h, t, panX = 0, panY = 0) {
     if (this.key === 'ar') {
       // 实景：摄像头画面全屏铺满（cover），画面随手机转动天然旋转，无需平移
-      const v = window.__camVideo;
+      const v = P.cameraFrame();
       if (v && v.readyState >= 2 && v.videoWidth > 0) {
         const s = Math.max(w / v.videoWidth, h / v.videoHeight);
         const dw = v.videoWidth * s, dh = v.videoHeight * s;
@@ -263,13 +227,6 @@ export function drawTarget(ctx, cx, cy, ringR, zoom = 1, shadow = true, style = 
   ctx.restore();
 }
 
-export function scoreOf(distPx, ringR) {
-  const r = distPx / ringR;
-  if (r > 10) return { score: 0, x: false };
-  if (r <= 0.5) return { score: 10, x: true };
-  return { score: Math.max(1, Math.ceil(10 - r)), x: false };
-}
-
 // ---------- 对局会话 ----------
 // 状态机: idle → drawing(拉弓/蓄力) → flying(箭飞行) → mark(命中展示) → 下一支 → done
 export class RangeSession {
@@ -303,10 +260,12 @@ export class RangeSession {
     this.scaleMode = this.scaleMode || 'sport'; // 视觉比例：sport=竞技 / real=写实
   }
   get ringR() {
-    return outerR(this.dist, this.scene.key, innerWidth, innerHeight, this.scaleMode) / 10 * this.faceScale;
+    const vp = P.viewport();
+    return outerR(this.dist, this.scene.key, vp.w, vp.h, this.scaleMode) / 10 * this.faceScale;
   }
   targetCenter(t) {
-    const base = this.scene.anchor(innerWidth, innerHeight, this.panX || 0, this.panY || 0);
+    const vp = P.viewport();
+    const base = this.scene.anchor(vp.w, vp.h, this.panX || 0, this.panY || 0);
     let x = 0;
     if (this.moving > 0) {
       x = Math.sin(t * this.moving * 1.4 + this.movingPh) * this.ringR * 9;
@@ -479,7 +438,7 @@ export class RangeSession {
     const pr = Math.min(w, h) * 0.47;
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, w, h); ctx.arc(cx, cy, pr, 0, Math.PI * 2, true);
-    ctx.fillStyle = 'rgba(4,5,8,.68)'; ctx.fill('evenodd'); ctx.restore();
+    ctx.fillStyle = 'rgba(4,5,8,.68)'; ctx.fill(); ctx.restore();
     // 窥孔金属圈（暗金属 + 左上高光弧）
     ctx.strokeStyle = this._darkGrad(ctx, cx - pr, cy - pr, cx + pr, cy + pr);
     ctx.lineWidth = 4.5;
@@ -525,6 +484,7 @@ export class RangeSession {
   // 靶架：布靶=剁草麻布靶垛+木腿；纸靶=复合材质挂架（竖杆+横梁+夹具）
   _drawStand(ctx, tc, out) {
     const style = this.scene.def.targetStyle;
+    const vp = P.viewport();
     ctx.save();
     if (style === 'cloth') {
       // 地面投影
@@ -557,7 +517,7 @@ export class RangeSession {
       ctx.beginPath(); ctx.roundRect(bx0 + out * 0.1, by0 + out * 0.1, bw - out * 0.2, bh - out * 0.2, out * 0.28); ctx.stroke();
     } else if (style === 'straw') {
       // 草靶垛（青松谷/雪岭）：圆形草靶 + A 字木腿；移动靶时横向加长盖住行程
-      const baked = this.scene.def.br * BG_IMG_H * bgScale(innerWidth, innerHeight);
+      const baked = this.scene.def.br * BG_IMG_H * bgScale(vp.w, vp.h);
       const travel = this.moving > 0 ? this.ringR * 9 : 0;
       const rb = Math.max(out * 1.3, baked + 3);        // 垛体半径
       const halfW = Math.max(rb, baked + travel + 4);   // 横向半宽（覆盖移动行程）
@@ -604,7 +564,7 @@ export class RangeSession {
       ctx.lineTo(bx0 + halfW * 2 - rb * 0.4, by0 + rb * 0.12); ctx.stroke();
     } else if (style === 'astra') {
       // 符文浮盘（星坠荒原）：深空石盘 + 金辉描边 + 盘缘符文，悬浮无腿
-      const baked = this.scene.def.br * BG_IMG_H * bgScale(innerWidth, innerHeight);
+      const baked = this.scene.def.br * BG_IMG_H * bgScale(vp.w, vp.h);
       const travel = this.moving > 0 ? this.ringR * 9 : 0;
       const rr = Math.max(out * 1.38, baked + 5);
       const halfW = Math.max(rr, baked + travel + 6);
@@ -645,7 +605,7 @@ export class RangeSession {
     } else {
       // 赛事靶架：方形泡沫靶垛 + 三脚铝架 + 顶部靶纸夹（参考 WA 赛事靶架）
       // 靶垛必须盖住背景烘焙靶（含移动靶行程）
-      const baked = this.scene.def.br * BG_IMG_H * bgScale(innerWidth, innerHeight);
+      const baked = this.scene.def.br * BG_IMG_H * bgScale(vp.w, vp.h);
       const travel = this.moving > 0 ? this.ringR * 9 : 0;
       const bw = Math.max(out * 2.6, (baked + travel) * 2.15);
       const bh = bw * 1.02;
@@ -768,9 +728,9 @@ export class RangeSession {
     if (this.state !== 'drawing') return;
     const p = this.power;
     const aimX = input.x + this.sway.x, aimY = input.y + this.sway.y;
-    // 拉弓不足 → 箭速低 → 下落大、受风大；弓种箭速影响下落与风漂
+    // 拉弓不足 → 箭速低 → 下落大、受风大；低力度惩罚陡化（轻点秒放明显短箭），弓种箭速影响下落与风漂
     const dm = this.bowCfg.dropMul;
-    const drop = ((1 - p) * this.ringR * 2.2 + this.ringR * 0.12 * (this.dist / 50)) * dm;
+    const drop = (Math.pow(1 - p, 1.6) * this.ringR * 2.6 + this.ringR * 0.12 * (this.dist / 50)) * dm;
     const windDrift = this.sway.env.wind * this.sway.windDir *
       (this.dist / 30) * (1.3 - p) * this.ringR * 0.6 * dm;
     const impact = { x: aimX + windDrift, y: aimY + drop };
@@ -807,7 +767,7 @@ export class RangeSession {
     }
     if (this.state === 'drawing') {
       this.holdSec += dt;
-      this.power = clamp(this.power + dt / 0.9, 0, 1);
+      this.power = clamp(this.power + dt / 1.05, 0, 1);
       const ax = input.x + this.sway.x, ay = input.y + this.sway.y;
       this.samples.push({ x: ax, y: ay });
       if (this.samples.length > 240) this.samples.shift();
@@ -825,8 +785,9 @@ export class RangeSession {
       this.zoom = lerp(this.zoom, this.flight.isLast ? 2.4 : 1, dt * 5);
       // 弹道采样：抛物线弧（中段上拱、末端下落），逐帧记录供尾迹绘制
       const f = Math.min(1, this.flight.t / FLIGHT_T);
-      const cx = innerWidth / 2, cy = innerHeight * 0.46;
-      const sx = cx + (input.x + this.sway.x) * (1 - f) * 0.4, sy = innerHeight * 0.95;
+      const vp = P.viewport();
+      const cx = vp.w / 2, cy = vp.h * 0.46;
+      const sx = cx + (input.x + this.sway.x) * (1 - f) * 0.4, sy = vp.h * 0.95;
       const ex = cx + this.flight.impact.x, ey = cy + this.flight.impact.y;
       const arcH = clamp(this.ringR * 6 * (0.5 + this.dist / 100), 10, 70);
       this.flight.trail.push({
@@ -836,12 +797,12 @@ export class RangeSession {
       if (this.flight.t > FLIGHT_T) {
         // 命中判定（相对当前靶心，移动靶按命中时刻位置）
         const tc = this.targetCenter(t);
-        const dx = this.flight.impact.x - (tc.x - innerWidth / 2);
-        const dy = this.flight.impact.y - (tc.y - innerHeight * 0.46);
+        const dx = this.flight.impact.x - (tc.x - vp.w / 2);
+        const dy = this.flight.impact.y - (tc.y - vp.h * 0.46);
         const { score, x } = scoreOf(Math.hypot(dx, dy), this.ringR);
         const shot = { ...this.flight, score, x, dx, dy };
         // 插靶角度：箭飞行方向的反向（从弹孔指向射手/屏幕下方）
-        shot.stickAng = Math.atan2(-(ey - innerHeight * 0.95), -(this.flight.impact.x));
+        shot.stickAng = Math.atan2(-(ey - vp.h * 0.95), -(this.flight.impact.x));
         this.shots.push(shot);
         this.total += score;
         this.onShot?.(shot, this.shots.length, this.arrows);
@@ -978,7 +939,7 @@ export class RangeSession {
       // 下落补偿参考点
       if (this.assist) {
         const dm = this.bowCfg.dropMul;
-        const drop = ((1 - this.power) * this.ringR * 2.2 + this.ringR * 0.12 * (this.dist / 50)) * dm;
+        const drop = (Math.pow(1 - this.power, 1.6) * this.ringR * 2.6 + this.ringR * 0.12 * (this.dist / 50)) * dm;
         ctx.strokeStyle = 'rgba(141,140,136,.5)'; ctx.setLineDash([3, 4]);
         ctx.beginPath(); ctx.arc(ax, ay + drop * this.bowCfg.zoom, 5, 0, 7); ctx.stroke();
         ctx.setLineDash([]);
